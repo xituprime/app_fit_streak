@@ -29,3 +29,5 @@ Los entrenamientos se guardan solamente en IndexedDB del dispositivo. `src/poseD
 3. Autoriza la cámara y realiza una repetición completa: brazos extendidos (**UP**), baja hasta flexionar claramente el codo (**DOWN**) y vuelve a extenderlos (**UP**).
 4. Comprueba que solo se cuenta al volver a UP, que aparece el feedback y que al llegar al objetivo se guarda la serie en el historial.
 5. Prueba el sonido con el volumen activado: anuncia cada cinco repeticiones y el final de la serie.
+
+La cámara frontal es la predeterminada. Usa el botón **Frontal/Trasera** sobre el preview para cambiarla; el modo frontal se muestra como espejo, sin alterar los landmarks que analiza MediaPipe.
