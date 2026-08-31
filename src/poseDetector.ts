@@ -1,5 +1,5 @@
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
-import { PushUpCounter, type PushUpDebug, type PushUpFeedback } from './pushUpCounter'
+import { PushUpCounter, type Landmark, type PushUpDebug, type PushUpFeedback } from './pushUpCounter'
 
 export type ExerciseDetector = {
   start(video: HTMLVideoElement): Promise<void>
@@ -7,6 +7,7 @@ export type ExerciseDetector = {
   onRep(callback: () => void): void
   onFeedback(callback: (feedback: PushUpFeedback) => void): void
   onDebug(callback: (debug: PushUpDebug) => void): void
+  onPose(callback: (landmarks: Landmark[] | null) => void): void
 }
 
 /** MediaPipe adapter. Video frames stay in the browser; only model/WASM assets are fetched. */
@@ -18,6 +19,7 @@ export const createPushUpDetector = (): ExerciseDetector => {
   let feedbackCallback: (feedback: PushUpFeedback) => void = () => {}
   let debugCallback: (debug: PushUpDebug) => void = () => {}
   let lastDebug: PushUpDebug = { state: 'UP', elbowAngle: null, visibility: 0, reps: 0 }
+  let poseCallback: (landmarks: Landmark[] | null) => void = () => {}
   const counter = new PushUpCounter()
 
   const detect = (video: HTMLVideoElement) => {
@@ -26,13 +28,12 @@ export const createPushUpDetector = (): ExerciseDetector => {
       lastVideoTime = video.currentTime
       const result = landmarker.detectForVideo(video, performance.now())
       const pose = result.landmarks[0]
-      if (pose) {
-        const event = counter.analyze(pose)
-        feedbackCallback(event.feedback)
-        lastDebug = event.debug
-        debugCallback(event.debug)
-        if (event.completedRep) repCallback()
-      } else { feedbackCallback('Colócate de lado'); debugCallback({ ...lastDebug, elbowAngle: null, visibility: 0 }) }
+      poseCallback(pose ?? null)
+      const event = counter.analyze(pose ?? [])
+      feedbackCallback(event.feedback)
+      lastDebug = event.debug
+      debugCallback(event.debug)
+      if (event.completedRep) repCallback()
     }
     frameId = requestAnimationFrame(() => detect(video))
   }
@@ -50,6 +51,7 @@ export const createPushUpDetector = (): ExerciseDetector => {
     stop() { cancelAnimationFrame(frameId); frameId = 0; landmarker?.close(); landmarker = undefined },
     onRep(callback) { repCallback = callback },
     onFeedback(callback) { feedbackCallback = callback },
-    onDebug(callback) { debugCallback = callback }
+    onDebug(callback) { debugCallback = callback },
+    onPose(callback) { poseCallback = callback }
   }
 }

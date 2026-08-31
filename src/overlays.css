@@ -1,0 +1,4 @@
+.setup-guide,.pose-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.setup-guide{z-index:1;fill:none;stroke:#e7f4df99;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.setup-guide.ready{stroke:#98f55a55}.setup-guide.mirrored,.pose-overlay.mirrored{transform:scaleX(-1)}
+.pose-overlay{z-index:2}.switch-camera,.overlay-counter,.camera-label{z-index:3}
