@@ -1,11 +1,12 @@
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
-import { PushUpCounter, type PushUpFeedback } from './pushUpCounter'
+import { PushUpCounter, type PushUpDebug, type PushUpFeedback } from './pushUpCounter'
 
 export type ExerciseDetector = {
   start(video: HTMLVideoElement): Promise<void>
   stop(): void
   onRep(callback: () => void): void
   onFeedback(callback: (feedback: PushUpFeedback) => void): void
+  onDebug(callback: (debug: PushUpDebug) => void): void
 }
 
 /** MediaPipe adapter. Video frames stay in the browser; only model/WASM assets are fetched. */
@@ -15,6 +16,8 @@ export const createPushUpDetector = (): ExerciseDetector => {
   let lastVideoTime = -1
   let repCallback = () => {}
   let feedbackCallback: (feedback: PushUpFeedback) => void = () => {}
+  let debugCallback: (debug: PushUpDebug) => void = () => {}
+  let lastDebug: PushUpDebug = { state: 'UP', elbowAngle: null, visibility: 0, reps: 0 }
   const counter = new PushUpCounter()
 
   const detect = (video: HTMLVideoElement) => {
@@ -26,15 +29,17 @@ export const createPushUpDetector = (): ExerciseDetector => {
       if (pose) {
         const event = counter.analyze(pose)
         feedbackCallback(event.feedback)
+        lastDebug = event.debug
+        debugCallback(event.debug)
         if (event.completedRep) repCallback()
-      } else feedbackCallback('Colócate de lado')
+      } else { feedbackCallback('Colócate de lado'); debugCallback({ ...lastDebug, elbowAngle: null, visibility: 0 }) }
     }
     frameId = requestAnimationFrame(() => detect(video))
   }
 
   return {
     async start(video) {
-      counter.reset(); lastVideoTime = -1
+      counter.reset(); lastDebug = { state: 'UP', elbowAngle: null, visibility: 0, reps: 0 }; lastVideoTime = -1
       const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm')
       landmarker = await PoseLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task', delegate: 'GPU' },
@@ -44,6 +49,7 @@ export const createPushUpDetector = (): ExerciseDetector => {
     },
     stop() { cancelAnimationFrame(frameId); frameId = 0; landmarker?.close(); landmarker = undefined },
     onRep(callback) { repCallback = callback },
-    onFeedback(callback) { feedbackCallback = callback }
+    onFeedback(callback) { feedbackCallback = callback },
+    onDebug(callback) { debugCallback = callback }
   }
 }

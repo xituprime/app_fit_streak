@@ -31,3 +31,5 @@ Los entrenamientos se guardan solamente en IndexedDB del dispositivo. `src/poseD
 5. Prueba el sonido con el volumen activado: anuncia cada cinco repeticiones y el final de la serie.
 
 La cámara frontal es la predeterminada. Usa el botón **Frontal/Trasera** sobre el preview para cambiarla; el modo frontal se muestra como espejo, sin alterar los landmarks que analiza MediaPipe.
+
+Durante la calibración se muestra un panel **DEBUG** con estado, ángulo de codo suavizado, visibilidad y repeticiones. El contador exige UP estable, DOWN estable y nuevamente UP estable (cuatro frames por extremo); mantener la posición baja no cuenta.
