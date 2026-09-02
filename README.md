@@ -35,3 +35,11 @@ La cámara frontal es la predeterminada. Usa el botón **Frontal/Trasera** sobre
 Durante la calibración se muestra un panel **DEBUG** con estado, ángulo de codo suavizado, visibilidad y repeticiones. El contador exige UP estable, DOWN estable y nuevamente UP estable (cuatro frames por extremo); mantener la posición baja no cuenta.
 
 Antes de contar, el modo **SETUP** exige una pose lateral y horizontal mantenida durante unos 0.9 s. El cuerpo debe tener hombro, codo, muñeca, cadera, rodilla y tobillo visibles, además de alineación hombro–cadera–tobillo. La guía y los landmarks se muestran temporalmente sobre la cámara para facilitar la calibración.
+
+## Supabase
+
+1. Copia `.env.example` a `.env` y configura la URL del proyecto y la **anon key** (nunca la service-role key).
+2. Ejecuta `supabase/migrations/0001_fitness_social.sql` en el SQL Editor de Supabase.
+3. En Authentication activa Email/Password y configura la URL de redirección para recuperación de contraseña.
+
+La migración crea perfiles, entrenamientos, amistades, funciones de progreso y políticas RLS. El día de racha se calcula en el servidor mediante la zona IANA guardada en el perfil; el RPC `record_workout` es el único que puede modificar XP, nivel y rachas.

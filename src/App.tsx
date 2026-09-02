@@ -1,95 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { workouts, type Workout } from './db'
-import { createPushUpDetector } from './poseDetector'
+import { createCrunchDetector, createPushUpDetector } from './poseDetector'
 import PoseOverlay from './PoseOverlay'
-import type { Landmark, PushUpDebug, PushUpFeedback } from './pushUpCounter'
+import SocialHub from './SocialHub'
+import { social } from './social'
+import type { Landmark } from './pushUpCounter'
 
-type View = 'home' | 'workout' | 'history'
-const day = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
-const formatDate = (value: string) => new Intl.DateTimeFormat('es-GT', { day: 'numeric', month: 'short' }).format(new Date(`${value}T12:00:00`))
+type View = 'home'|'workout'|'history'|'social'; type Exercise='pushups'|'crunches'
+type Debug={mode:'SETUP'|'READY';state:string;elbowAngle?:number|null;torsoAngle?:number|null;visibility:number;reps:number}
+const day=(d=new Date())=>new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)
 
-export default function App() {
-  const [view, setView] = useState<View>('home')
-  const [goal, setGoal] = useState(20)
-  const [reps, setReps] = useState(0)
-  const [history, setHistory] = useState<Workout[]>([])
-  const [cameraError, setCameraError] = useState('')
-  const [feedback, setFeedback] = useState<PushUpFeedback | 'Serie completada'>('Colócate dentro de la guía')
-  const [debug, setDebug] = useState<PushUpDebug>({ mode: 'SETUP', state: 'UP', elbowAngle: null, visibility: 0, reps: 0 })
-  const [landmarks, setLandmarks] = useState<Landmark[] | null>(null)
-  const [stream, setStream] = useState<MediaStream | null>(null)
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user')
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const cameraRequestRef = useRef(0)
-  const repsRef = useRef(0)
-  const savingRef = useRef(false)
-  const detector = useMemo(createPushUpDetector, [])
-  const refresh = async () => setHistory((await workouts.all()).sort((a, b) => b.date.localeCompare(a.date)))
-  useEffect(() => { refresh() }, [])
-  const stopCamera = useCallback(() => {
-    cameraRequestRef.current += 1
-    streamRef.current?.getTracks().forEach(track => track.stop())
-    streamRef.current = null
-    setStream(null)
-    detector.stop()
-  }, [detector])
-  const requestCamera = useCallback(async (nextFacingMode: 'user' | 'environment') => {
-    // Stop every old track before requesting the next device; stale permission responses are discarded.
-    stopCamera()
-    const requestId = cameraRequestRef.current
-    setCameraError('')
-    try {
-      const cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: nextFacingMode }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
-      if (requestId !== cameraRequestRef.current) { cameraStream.getTracks().forEach(track => track.stop()); return }
-      streamRef.current = cameraStream
-      setFacingMode(nextFacingMode)
-      setStream(cameraStream)
-    } catch { setCameraError('No se pudo acceder a esta cámara. Puedes continuar con el contador manual.') }
-  }, [stopCamera])
-  const say = useCallback((message: string) => {
-    if (!('speechSynthesis' in window)) return
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(message))
-  }, [])
-  const finish = useCallback(async (finalReps = repsRef.current) => {
-    if (savingRef.current) return
-    savingRef.current = true
-    stopCamera()
-    if (finalReps > 0) { await workouts.add({ date: day(), reps: finalReps, goal, xp: finalReps >= goal ? 50 : Math.max(10, finalReps) }); await refresh() }
-    setView('home'); savingRef.current = false
-  }, [goal, stopCamera])
-  const addRep = useCallback(() => {
-    if (repsRef.current >= goal) return
-    const next = repsRef.current + 1
-    repsRef.current = next; setReps(next)
-    if (next === goal || next % 5 === 0) say(next === goal ? 'Serie completada' : `${next}`)
-    if (next >= goal) { setFeedback('Serie completada'); say('Serie completada. Excelente trabajo.'); window.setTimeout(() => void finish(next), 900) }
-  }, [finish, goal, say])
-  useEffect(() => { detector.onRep(addRep); detector.onFeedback(setFeedback); detector.onDebug(setDebug); detector.onPose(setLandmarks) }, [detector, addRep])
-  useEffect(() => () => { detector.stop() }, [detector])
-  useEffect(() => {
-    if (view !== 'workout' || !stream || !videoRef.current) return
-    const video = videoRef.current
-    let cancelled = false
-    video.srcObject = stream
-    video.play().then(() => cancelled ? undefined : detector.start(video)).catch(() => setCameraError('La cámara está lista, pero no pudo iniciarse la detección. Puedes usar +1 manual.'))
-    return () => { cancelled = true; detector.stop() }
-  }, [view, stream, detector])
-
-  const stats = useMemo(() => {
-    const totalXp = history.reduce((sum, item) => sum + item.xp, 0)
-    const dates = [...new Set(history.map(x => x.date))].sort().reverse()
-    let streak = 0, cursor = new Date(); cursor.setHours(0,0,0,0)
-    if (dates[0] && dates[0] !== day(cursor)) cursor.setDate(cursor.getDate() - 1)
-    for (const date of dates) { if (date === day(cursor)) { streak++; cursor.setDate(cursor.getDate() - 1) } else if (date < day(cursor)) break }
-    return { totalXp, streak }
-  }, [history])
-  const startWorkout = async () => {
-    savingRef.current = false; repsRef.current = 0; setReps(0); setLandmarks(null); setDebug({ mode: 'SETUP', state: 'UP', elbowAngle: null, visibility: 0, reps: 0 }); setFeedback('Colócate dentro de la guía'); setCameraError(''); setView('workout')
-    await requestCamera(facingMode)
-  }
-  const removeManualRep = () => { const next = Math.max(0, repsRef.current - 1); repsRef.current = next; setReps(next) }
-  if (view === 'workout') return <main className="workout"><button className="back" onClick={() => void finish()}>×</button><div className="camera"><video ref={videoRef} className={facingMode === 'user' ? 'mirrored' : ''} muted playsInline/><svg className={`setup-guide${debug.mode === 'READY' ? ' ready' : ''}${facingMode === 'user' ? ' mirrored' : ''}`} viewBox="0 0 100 100" aria-hidden="true"><circle cx="25" cy="35" r="5"/><path d="M30 40 L53 48 L75 50 M34 44 L20 60 L10 68 M53 48 L64 65 L80 70"/><circle cx="20" cy="60" r="2"/><circle cx="10" cy="68" r="2"/><circle cx="64" cy="65" r="2"/><circle cx="80" cy="70" r="2"/></svg><PoseOverlay landmarks={landmarks} mirrored={facingMode === 'user'} /><button className="switch-camera" onClick={() => void requestCamera(facingMode === 'user' ? 'environment' : 'user')} aria-label="Alternar cámara">↺ <span>{facingMode === 'user' ? 'Frontal' : 'Trasera'}</span></button><div className="counter overlay-counter">{reps}<span> / {goal}</span></div><div className="camera-label">{debug.mode === 'SETUP' ? 'SETUP · ALINEA TU CUERPO CON LA GUÍA' : 'READY · POSE DETECTADA'}</div></div><div className="debug-panel"><b>DEBUG</b><span>Modo: {debug.mode}</span><span>Estado: {debug.state}</span><span>Codo: {debug.elbowAngle ?? '—'}°</span><span>Visibilidad: {debug.visibility}%</span><span>Reps: {reps}</span></div><div className="feedback" aria-live="polite">{feedback}</div>{cameraError && <p className="notice">{cameraError}</p>}<div className="progress"><i style={{ width: `${Math.min(100, reps / goal * 100)}%` }}/></div><div className="controls"><button className="round" onClick={removeManualRep}>−</button><button className="rep" onClick={addRep}>+1</button><button className="round" onClick={() => void finish()}>✓</button></div><p className="hint">Cuenta automática solo tras READY. Usa +1 solo como respaldo.</p></main>
-  return <main><header><div><p className="brand">FIT STREAK</p><h1>Hola, atleta.</h1></div><div className="streak">🔥<b>{stats.streak}</b><small>días</small></div></header><section className="xp"><span>NIVEL 1</span><strong>{stats.totalXp} XP</strong><div><i style={{width: `${Math.min(100, stats.totalXp % 100)}%`}}/></div></section>{view === 'history' ? <><div className="title-row"><h2>Historial</h2><button className="link" onClick={() => setView('home')}>Hoy</button></div>{history.length ? <section className="history">{history.map(item => <article key={item.id}><div><b>{formatDate(item.date)}</b><small>Push-ups / Despechadas</small></div><strong>{item.reps}<small> reps</small></strong><em>+{item.xp} XP</em></article>)}</section> : <p className="empty">Aún no hay entrenamientos. Tu primera sesión empieza hoy.</p>}</> : <><p className="eyebrow">ENTRENAMIENTO DE HOY</p><section className="card"><div className="exercise-icon">⌁</div><p>FUERZA · PECHO</p><h2>Push-ups<br/><span>Despechadas</span></h2><label>Objetivo de repeticiones</label><div className="goals">{[10,20,30,40].map(n => <button className={goal === n ? 'selected' : ''} onClick={() => setGoal(n)} key={n}>{n}</button>)}</div><button className="primary" onClick={startWorkout}>Empezar entrenamiento <span>→</span></button></section><button className="history-button" onClick={() => setView('history')}>Ver historial <span>›</span></button></>}</main>
+export default function App(){
+  const [view,setView]=useState<View>('home'),[exercise,setExercise]=useState<Exercise>('pushups'),[goal,setGoal]=useState(20),[reps,setReps]=useState(0),[history,setHistory]=useState<Workout[]>([]),[feedback,setFeedback]=useState('Colócate dentro de la guía'),[debug,setDebug]=useState<Debug>({mode:'SETUP',state:'UP',visibility:0,reps:0}),[landmarks,setLandmarks]=useState<Landmark[]|null>(null),[stream,setStream]=useState<MediaStream|null>(null),[facing,setFacing]=useState<'user'|'environment'>('user'),[error,setError]=useState('')
+  const videoRef=useRef<HTMLVideoElement>(null),streamRef=useRef<MediaStream|null>(null),requestRef=useRef(0),repsRef=useRef(0),saving=useRef(false),startedAt=useRef(0)
+  const push=useMemo(createPushUpDetector,[]),crunch=useMemo(createCrunchDetector,[])
+  const refresh=async()=>setHistory((await workouts.all()).sort((a,b)=>b.date.localeCompare(a.date)))
+  useEffect(()=>{void refresh()},[])
+  const stop=useCallback(()=>{requestRef.current++;streamRef.current?.getTracks().forEach(t=>t.stop());streamRef.current=null;setStream(null);push.stop();crunch.stop()},[push,crunch])
+  const requestCamera=useCallback(async(next:'user'|'environment')=>{stop();const id=requestRef.current;try{const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:next},width:{ideal:1280},height:{ideal:720}},audio:false});if(id!==requestRef.current){s.getTracks().forEach(t=>t.stop());return}streamRef.current=s;setFacing(next);setStream(s)}catch{setError('No se pudo acceder a esta cámara.')}},[stop])
+  const say=(text:string)=>{if('speechSynthesis'in window){speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(text))}}
+  const finish=useCallback(async(finalReps=repsRef.current)=>{if(saving.current)return;saving.current=true;stop();const durationSeconds=Math.max(0,Math.round((Date.now()-startedAt.current)/1000));if(finalReps>0){const xp=finalReps>=goal?50:Math.max(10,finalReps);await workouts.add({date:day(),reps:finalReps,goal,xp,exercise,durationSeconds});await social.recordWorkout(exercise,finalReps,durationSeconds).catch(()=>undefined);await refresh()}setView('home');saving.current=false},[stop,goal,exercise])
+  const addRep=useCallback(()=>{if(repsRef.current>=goal)return;const next=++repsRef.current;setReps(next);if(next%5===0||next===goal)say(next===goal?'Serie completada':`${next}`);if(next>=goal){setFeedback('Serie completada');window.setTimeout(()=>void finish(next),900)}},[goal,finish])
+  useEffect(()=>{if(exercise==='pushups'){push.onRep(addRep);push.onFeedback(v=>setFeedback(v));push.onPose(setLandmarks);push.onDebug(v=>setDebug(v));return()=>push.stop()}crunch.onRep(addRep);crunch.onFeedback(v=>setFeedback(v));crunch.onPose(setLandmarks);crunch.onDebug(v=>setDebug(v));return()=>crunch.stop()},[exercise,push,crunch,addRep])
+  useEffect(()=>{if(view!=='workout'||!stream||!videoRef.current)return;const video=videoRef.current,detector=exercise==='pushups'?push:crunch;let cancelled=false;video.srcObject=stream;video.play().then(()=>cancelled?undefined:detector.start(video)).catch(()=>setError('No se pudo iniciar la detección.'));return()=>{cancelled=true;detector.stop()}},[view,stream,exercise,push,crunch])
+  useEffect(()=>()=>stop(),[stop])
+  const start=async()=>{saving.current=false;startedAt.current=Date.now();repsRef.current=0;setReps(0);setLandmarks(null);setDebug({mode:'SETUP',state:'UP',visibility:0,reps:0});setFeedback('Colócate dentro de la guía');setError('');setView('workout');await requestCamera(facing)}
+  const totalXp=history.reduce((s,w)=>s+w.xp,0)
+  if(view==='social')return <SocialHub onClose={()=>setView('home')}/>
+  if(view==='workout')return <main className="workout"><button className="back" onClick={()=>void finish()}>×</button><div className="camera"><video ref={videoRef} className={facing==='user'?'mirrored':''} muted playsInline/><svg className={`setup-guide ${exercise==='crunches'?'crunch-guide':''}${debug.mode==='READY'?' ready':''}${facing==='user'?' mirrored':''}`} viewBox="0 0 100 100" aria-label="Guía de posición">{exercise==='pushups'?<><circle cx="20" cy="38" r="5"/><path d="M25 42 L48 50 L74 52 M29 46 L16 62 L7 70 M48 50 L61 67 L82 72"/></>:<><circle cx="17" cy="67" r="5"/><path d="M22 67 C33 67 43 69 55 72 L66 72 M34 69 L40 57 M66 72 L79 54 L92 72 M66 73 L78 86 L94 86"/><circle cx="79" cy="54" r="2"/><circle cx="92" cy="72" r="2"/><circle cx="94" cy="86" r="2"/></>}</svg><PoseOverlay landmarks={landmarks} mirrored={facing==='user'}/><button className="switch-camera" onClick={()=>void requestCamera(facing==='user'?'environment':'user')}>↺ <span>{facing==='user'?'Frontal':'Trasera'}</span></button><div className="counter overlay-counter">{reps}<span> / {goal}</span></div><div className="camera-label">{exercise==='pushups'?'PUSH-UPS':'CRUNCHES'} · {debug.mode}</div></div><div className="debug-panel"><b>DEBUG</b><span>Modo: {debug.mode}</span><span>Estado: {debug.state}</span><span>Ángulo: {debug.elbowAngle??debug.torsoAngle??'—'}°</span><span>Visibilidad: {debug.visibility}%</span><span>Reps: {reps}</span></div><div className="feedback">{feedback}</div>{error&&<p className="notice">{error}</p>}<div className="progress"><i style={{width:`${Math.min(100,reps/goal*100)}%`}}/></div><div className="controls"><button className="round" onClick={()=>{repsRef.current=Math.max(0,repsRef.current-1);setReps(repsRef.current)}}>−</button><button className="rep" onClick={addRep}>+1</button><button className="round" onClick={()=>void finish()}>✓</button></div></main>
+  if(view==='history')return <main><button className="link" onClick={()=>setView('home')}>‹ Inicio</button><h2>Historial</h2>{history.map(w=><article className="history" key={w.id}><b>{w.exercise==='crunches'?'Crunches':'Push-ups'}</b><span>{w.reps} reps · +{w.xp} XP</span></article>)}</main>
+  return <main><header><div><p className="brand">FIT STREAK</p><h1>Hola, atleta.</h1></div><button className="link" onClick={()=>setView('social')}>Perfil</button></header><section className="xp"><span>NIVEL 1</span><strong>{totalXp} XP</strong><div><i style={{width:`${totalXp%100}%`}}/></div></section><p className="eyebrow">ENTRENAMIENTO DE HOY</p><section className="card"><div className="goals"><button className={exercise==='pushups'?'selected':''} onClick={()=>setExercise('pushups')}>Push-ups</button><button className={exercise==='crunches'?'selected':''} onClick={()=>setExercise('crunches')}>Crunches</button></div><h2>{exercise==='pushups'?'Push-ups':'Crunches'}<br/><span>{exercise==='pushups'?'Despechadas':'Abdominales'}</span></h2><label>Objetivo</label><div className="goals">{[10,20,30,40].map(n=><button className={goal===n?'selected':''} onClick={()=>setGoal(n)} key={n}>{n}</button>)}</div><button className="primary" onClick={()=>void start()}>Empezar entrenamiento <span>→</span></button></section><button className="history-button" onClick={()=>setView('history')}>Ver historial <span>›</span></button></main>
 }
